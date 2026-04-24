@@ -824,7 +824,7 @@ def run_pipeline() -> None:
         log.error("DISCORD_WEBHOOK_URL not set. Exiting.")
         sys.exit(1)
 
-    google_enabled = bool(google_api_key and search_engine_id)
+   google_enabled = False
     if not google_enabled:
         log.warning("GOOGLE_API_KEY or SEARCH_ENGINE_ID not set — skipping Google CSE.")
 
