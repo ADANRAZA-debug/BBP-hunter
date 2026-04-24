@@ -1,0 +1,129 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# .github/workflows/bounty-scraper.yml
+#
+# Zero-Day Bug Bounty Discovery Engine — GitHub Actions CI/CD Pipeline
+#
+# Schedule : Every 6 hours (00:00, 06:00, 12:00, 18:00 UTC)
+# Secrets  : GOOGLE_API_KEY, SEARCH_ENGINE_ID, DISCORD_WEBHOOK_URL
+#            (Set in: Repo → Settings → Secrets and Variables → Actions)
+#
+# State    : processed_urls.txt is committed back to the repo after each run
+#            so URL deduplication persists across scheduled jobs.
+# ─────────────────────────────────────────────────────────────────────────────
+
+name: "🔐 Bug Bounty Discovery Engine"
+
+on:
+  schedule:
+    # Runs every 3 hours: 00:00, 03:00, 06:00, 09:00, 12:00, 15:00, 18:00, 21:00 UTC
+    - cron: "0 */3 * * *"
+
+  # Allow manual trigger from the Actions tab (for testing)
+  workflow_dispatch:
+    inputs:
+      debug_mode:
+        description: "Enable verbose debug logging"
+        required: false
+        default: "false"
+        type: boolean
+
+# Prevent concurrent runs from corrupting shared state file
+concurrency:
+  group: bounty-scraper
+  cancel-in-progress: false
+
+jobs:
+  discover:
+    name: "Run Discovery Pipeline"
+    runs-on: ubuntu-latest
+    timeout-minutes: 25   # Hard cap — prevents hung jobs from eating minutes
+
+    permissions:
+      contents: write       # Required to git push processed_urls.txt
+
+    steps:
+      # ── 1. Checkout repository ──────────────────────────────────────────
+      - name: "📥 Checkout repository"
+        uses: actions/checkout@v4
+        with:
+          # Fetch full history so git push doesn't fail on shallow clones
+          fetch-depth: 0
+          # Use the built-in GITHUB_TOKEN for pushing
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      # ── 2. Set up Python environment ────────────────────────────────────
+      - name: "🐍 Set up Python 3.11"
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+          cache-dependency-path: "requirements.txt"
+
+      # ── 3. Install dependencies ─────────────────────────────────────────
+      - name: "📦 Install Python dependencies"
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      # ── 4. Ensure state file exists (first run) ─────────────────────────
+      - name: "📄 Initialize state file if missing"
+        run: |
+          if [ ! -f processed_urls.txt ]; then
+            echo "# Zero-Day Bug Bounty Engine — Processed URL Hashes" > processed_urls.txt
+            echo "# Format: SHA-256 of normalized URL, one per line" >> processed_urls.txt
+            echo "# DO NOT EDIT MANUALLY" >> processed_urls.txt
+            echo "State file created."
+          else
+            echo "State file exists with $(wc -l < processed_urls.txt) entries."
+          fi
+
+      # ── 5. Run the discovery pipeline ───────────────────────────────────
+      - name: "🔍 Run Bug Bounty Discovery Engine"
+        env:
+          GOOGLE_API_KEY: ${{ secrets.GOOGLE_API_KEY }}
+          SEARCH_ENGINE_ID: ${{ secrets.SEARCH_ENGINE_ID }}
+          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+          PYTHONUNBUFFERED: "1"
+          # Pass debug flag if triggered manually with debug=true
+          DEBUG: ${{ github.event.inputs.debug_mode }}
+        run: |
+          python main.py
+
+      # ── 6. Commit and push updated state file ───────────────────────────
+      #
+      # This step commits processed_urls.txt back so the next scheduled run
+      # won't reprocess any URLs discovered in this run.
+      #
+      # Uses `git diff --quiet` to skip the commit if nothing changed
+      # (i.e., all URLs were already known → no new state to save).
+      # ────────────────────────────────────────────────────────────────────
+      - name: "💾 Persist state file to repository"
+        run: |
+          git config --global user.name  "BountyBot[Actions]"
+          git config --global user.email "bountybot@github-actions.bot"
+
+          # Stage the state file
+          git add processed_urls.txt
+
+          # Only commit if there are actual changes
+          if git diff --staged --quiet; then
+            echo "✓ No new URLs processed — state file unchanged. Skipping commit."
+          else
+            TIMESTAMP=$(date -u +"%Y-%m-%d %H:%M UTC")
+            ENTRY_COUNT=$(grep -c '^[a-f0-9]' processed_urls.txt 2>/dev/null || echo "?")
+            git commit -m "chore(state): update processed_urls.txt [${TIMESTAMP}] — ${ENTRY_COUNT} total entries [skip ci]"
+            git push origin HEAD
+            echo "✓ State file committed and pushed successfully."
+          fi
+
+      # ── 7. Upload logs as artifact (for debugging failed runs) ──────────
+      - name: "📋 Upload run logs"
+        if: always()   # Run even if the pipeline step failed
+        uses: actions/upload-artifact@v4
+        with:
+          name: "discovery-logs-${{ github.run_number }}"
+          path: |
+            processed_urls.txt
+          retention-days: 7
+          if-no-files-found: ignore
+
