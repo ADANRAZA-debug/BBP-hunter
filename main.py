@@ -836,12 +836,9 @@ def run_pipeline() -> None:
     log.info("\n[STAGE 1] Multi-Engine Search")
     all_results: list[SearchResult] = []
 
-    if google_enabled:
-        try:
-            google_results = stage1_google_search(google_api_key, search_engine_id)
-            all_results.extend(google_results)
-        except Exception as e:
-            log.error(f"Google search pipeline failed: {e}")
+    google_enabled = False
+if not google_enabled:
+    log.warning("GOOGLE_API_KEY or SEARCH_ENGINE_ID not set — skipping Google CSE.")
 
     try:
         bing_results = stage1_bing_search()
