@@ -1,0 +1,22 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# Zero-Day Bug Bounty Discovery Engine — Python Dependencies
+# Install: pip install -r requirements.txt
+# Python: 3.10+
+# ─────────────────────────────────────────────────────────────────────────────
+
+# HTTP client — content fetching, webhook, Bing/DDG scraping
+requests>=2.31.0
+
+# HTML parsing — content extraction & DOM structural analysis
+beautifulsoup4>=4.12.3
+lxml>=5.1.0          # Faster BS4 parser (fallback: html.parser built-in)
+
+# Google Custom Search API client
+google-api-python-client>=2.126.0
+
+# Retry logic with exponential backoff
+tenacity>=8.3.0
+
+# (Optional) async acceleration for future pipeline v3
+# httpx>=0.27.0
+# aiohttp>=3.9.5
